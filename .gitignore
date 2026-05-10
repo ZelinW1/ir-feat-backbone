@@ -1,0 +1,37 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Logs
+logs/
+*.log
+
+# Checkpoints / artifacts
+outputs/
+checkpoints/
+*.pth
+*.pt
+
+# TensorBoard
+runs/
+events.out.tfevents.*
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

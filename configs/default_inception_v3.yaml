@@ -1,0 +1,52 @@
+﻿# InceptionV3 多标签分类默认配置
+project:
+  name: "flir-inceptionv3-multilabel"
+  output_dir: "./outputs"
+  seed: 42
+  device: "cuda"
+
+# 数据相关配置
+data:
+  train_json: "./data/flir/train/annotations.json"
+  val_json: "./data/flir/val/annotations.json"
+  image_root: "./data/flir/images"
+  img_size: 299
+  num_workers: 4
+  pin_memory: true
+
+# 训练超参数
+train:
+  epochs: 20
+  batch_size: 16
+  amp: true
+  threshold: 0.5
+
+# 模型配置
+model:
+  name: "inception_v3"
+  pretrained: "IMAGENET1K_V1"
+  aux_logits: false
+
+# 优化器配置（差分学习率）
+optim:
+  optimizer: "adamw"
+  backbone_lr: 1.0e-5
+  head_lr: 1.0e-3
+  weight_decay: 1.0e-4
+
+# 学习率调度器
+scheduler:
+  name: "cosine"
+  min_lr: 1.0e-6
+
+# 日志配置
+logging:
+  backend: "tensorboard"
+  log_dir: "./outputs/runs"
+  print_freq: 20
+
+# 模型保存配置
+checkpoint:
+  dir: "./outputs/checkpoints"
+  best_name: "best_model.pth"
+  last_name: "last_model.pth"
