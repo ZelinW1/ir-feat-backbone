@@ -17,12 +17,14 @@ class FLIRMultiLabelDataset(Dataset[tuple[Tensor, Tensor, int]]):
     def __init__(
         self,
         annotation_path: str | Path,
-        image_root: str | Path,
+        image_root: str | Path | None = None,
         transform: Callable[[Image.Image], Tensor] | None = None,
         category_id_to_index: dict[int, int] | None = None,
+        use_only_annotated_categories: bool = True,
     ) -> None:
         self.annotation_path = Path(annotation_path)
-        self.image_root = Path(image_root)
+        self.image_root = Path(image_root) if image_root is not None else None
+        self.annotation_dir = self.annotation_path.parent
         self.transform = transform
 
         with self.annotation_path.open("r", encoding="utf-8") as f:
@@ -36,7 +38,11 @@ class FLIRMultiLabelDataset(Dataset[tuple[Tensor, Tensor, int]]):
             int(img["id"]): str(img["file_name"]) for img in images
         }
 
-        sorted_category_ids = sorted(int(cat["id"]) for cat in categories)
+        all_category_ids = sorted(int(cat["id"]) for cat in categories)
+        annotated_category_ids = sorted({int(ann["category_id"]) for ann in annotations})
+        sorted_category_ids = (
+            annotated_category_ids if use_only_annotated_categories else all_category_ids
+        )
         if category_id_to_index is None:
             self.category_id_to_index = {
                 cat_id: idx for idx, cat_id in enumerate(sorted_category_ids)
@@ -68,7 +74,18 @@ class FLIRMultiLabelDataset(Dataset[tuple[Tensor, Tensor, int]]):
 
     def __getitem__(self, index: int) -> tuple[Tensor, Tensor, int]:
         image_id, file_name, target = self.samples[index]
-        image_path = self.image_root / file_name
+        file_path = Path(file_name)
+        if file_path.is_absolute():
+            image_path = file_path
+        else:
+            candidate_by_root = (
+                self.image_root / file_path if self.image_root is not None else None
+            )
+            if candidate_by_root is not None and candidate_by_root.exists():
+                image_path = candidate_by_root
+            else:
+                # 默认遵循COCO常见约定：file_name 相对 annotation json 所在目录
+                image_path = self.annotation_dir / file_path
 
         with Image.open(image_path) as image:
             image = image.convert("L")

@@ -12,9 +12,10 @@ class GrayToRGB:
     """将单通道灰度图复制为三通道RGB。"""
 
     def __call__(self, image: Image.Image) -> Image.Image:
-        if image.mode != "L":
-            image = image.convert("L")
-        return Image.merge("RGB", (image, image, image))
+        # 更稳健且语义明确的做法：直接转换到RGB模式（会复制单通道到三通道）
+        if image.mode != "RGB":
+            return image.convert("RGB")
+        return image
 
 
 class LetterboxResize:
