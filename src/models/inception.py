@@ -12,6 +12,7 @@ def build_inception_v3(
     num_classes: int,
     pretrained: str = "IMAGENET1K_V1",
     aux_logits: bool = False,
+    dropout_p: float = 0.5,
     **_: Any,
 ) -> nn.Module:
     """构建InceptionV3多标签分类模型。"""
@@ -33,7 +34,10 @@ def build_inception_v3(
     if not aux_logits and hasattr(model, "AuxLogits"):
         model.AuxLogits = None
         model.aux_logits = False
-    model.fc = nn.Linear(FEATURE_DIM, num_classes)
+    model.fc = nn.Sequential(
+        nn.Dropout(p=dropout_p),
+        nn.Linear(FEATURE_DIM, num_classes),
+    )
     return model
 
 

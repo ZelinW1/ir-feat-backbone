@@ -49,11 +49,28 @@ class LetterboxResize:
 def build_transforms(img_size: int, is_train: bool) -> Callable[[Image.Image], Tensor]:
     """构建训练/验证预处理。"""
 
-    _ = is_train
+    common_ops: list[object] = [GrayToRGB(), LetterboxResize(size=img_size)]
+    train_aug_ops: list[object] = []
+    if is_train:
+        # 红外专属轻量增强：几何扰动 + 轻微失焦模拟
+        train_aug_ops = [
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomAffine(
+                degrees=5.0,
+                translate=(0.05, 0.05),
+                scale=(0.95, 1.05),
+                fill=(0, 0, 0),
+            ),
+            transforms.RandomApply(
+                [transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.0))],
+                p=0.2,
+            ),
+        ]
+
     return transforms.Compose(
         [
-            GrayToRGB(),
-            LetterboxResize(size=img_size),
+            *common_ops,
+            *train_aug_ops,
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=(0.485, 0.456, 0.406),

@@ -74,6 +74,44 @@ def build_dataloaders(config: dict[str, Any]) -> tuple[DataLoader, DataLoader, i
     return train_loader, val_loader, train_ds.num_classes, train_ds.category_id_to_index
 
 
+def set_backbone_trainable(model: nn.Module, trainable: bool) -> None:
+    """设置backbone参数是否参与训练，分类头始终可训练。"""
+    for name, param in model.named_parameters():
+        if name.startswith("fc."):
+            param.requires_grad = True
+        else:
+            param.requires_grad = trainable
+
+
+def build_optimizer(model: nn.Module, config: dict[str, Any], freeze_backbone: bool) -> AdamW:
+    """按阶段构建优化器：冻结阶段仅训练head，解冻后全局微调。"""
+    weight_decay = float(config["optim"]["weight_decay"])
+    head_lr = float(config["optim"]["head_lr"])
+    finetune_backbone_lr = float(
+        config["optim"].get("finetune_backbone_lr", config["optim"]["backbone_lr"])
+    )
+
+    head_params = [
+        p for n, p in model.named_parameters() if n.startswith("fc.") and p.requires_grad
+    ]
+    if freeze_backbone:
+        return AdamW(
+            [{"params": head_params, "lr": head_lr}],
+            weight_decay=weight_decay,
+        )
+
+    backbone_params = [
+        p for n, p in model.named_parameters() if (not n.startswith("fc.")) and p.requires_grad
+    ]
+    return AdamW(
+        [
+            {"params": backbone_params, "lr": finetune_backbone_lr},
+            {"params": head_params, "lr": head_lr},
+        ],
+        weight_decay=weight_decay,
+    )
+
+
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
@@ -97,33 +135,24 @@ def main() -> None:
         num_classes=num_classes,
         pretrained=str(config["model"]["pretrained"]),
         aux_logits=bool(config["model"]["aux_logits"]),
+        dropout_p=float(config["model"].get("dropout_p", 0.5)),
     ).to(device)
 
     criterion = nn.BCEWithLogitsLoss()
-
-    backbone_params = []
-    head_params = []
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            continue
-        if name.startswith("fc."):
-            head_params.append(param)
-        else:
-            backbone_params.append(param)
-
-    optimizer = AdamW(
-        [
-            {"params": backbone_params, "lr": float(config["optim"]["backbone_lr"])},
-            {"params": head_params, "lr": float(config["optim"]["head_lr"])},
-        ],
-        weight_decay=float(config["optim"]["weight_decay"]),
-    )
-
+    freeze_backbone_epochs = int(config["train"].get("freeze_backbone_epochs", 0))
+    freeze_backbone = freeze_backbone_epochs > 0
+    set_backbone_trainable(model, trainable=not freeze_backbone)
+    optimizer = build_optimizer(model=model, config=config, freeze_backbone=freeze_backbone)
+    scheduler_name = str(config["scheduler"].get("name", "cosine")).lower()
+    if scheduler_name != "cosine":
+        raise ValueError(f"当前仅支持cosine调度器，收到: {scheduler_name}")
     scheduler = CosineAnnealingLR(
         optimizer,
-        T_max=int(config["train"]["epochs"]),
+        T_max=max(1, int(config["train"]["epochs"])),
         eta_min=float(config["scheduler"]["min_lr"]),
     )
+    if freeze_backbone:
+        logger.info("前 %d 个epoch冻结backbone，仅训练分类头。", freeze_backbone_epochs)
 
     writer = SummaryWriter(log_dir=str(config["logging"]["log_dir"]))
     trainer = Trainer(
@@ -144,6 +173,21 @@ def main() -> None:
     best_map = -1.0
     epochs = int(config["train"]["epochs"])
     for epoch in range(1, epochs + 1):
+        if freeze_backbone and epoch == freeze_backbone_epochs + 1:
+            set_backbone_trainable(model, trainable=True)
+            optimizer = build_optimizer(model=model, config=config, freeze_backbone=False)
+            trainer.optimizer = optimizer
+            scheduler = CosineAnnealingLR(
+                optimizer,
+                T_max=max(1, epochs - freeze_backbone_epochs),
+                eta_min=float(config["scheduler"]["min_lr"]),
+            )
+            logger.info(
+                "从Epoch %d开始解冻backbone，全局微调LR(backbone)=%.2e。",
+                epoch,
+                float(config["optim"].get("finetune_backbone_lr", config["optim"]["backbone_lr"])),
+            )
+
         train_metrics = trainer.train_epoch(train_loader, epoch)
         val_metrics = trainer.val_epoch(val_loader, epoch)
         scheduler.step()
@@ -158,6 +202,16 @@ def main() -> None:
             val_metrics["macro_map"],
             val_metrics["macro_f1"],
         )
+        if "per_class_ap" in val_metrics:
+            per_class_ap = val_metrics["per_class_ap"]
+            if isinstance(per_class_ap, list):
+                index_to_cat_id = {idx: cat_id for cat_id, idx in cat_map.items()}
+                for cls_idx, ap in enumerate(per_class_ap):
+                    cat_id = index_to_cat_id.get(cls_idx, cls_idx)
+                    if ap != ap:  # NaN
+                        logger.info("Val AP | class_idx=%d coco_cat_id=%s ap=nan(样本单一)", cls_idx, cat_id)
+                    else:
+                        logger.info("Val AP | class_idx=%d coco_cat_id=%s ap=%.4f", cls_idx, cat_id, ap)
 
         save_checkpoint(
             path=last_path,

@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-from .metrics import compute_macro_f1, compute_macro_map
+from .metrics import compute_macro_f1, compute_macro_map, compute_per_class_ap
 
 
 class Trainer:
@@ -81,7 +81,7 @@ class Trainer:
         return {"loss": avg_loss, "macro_map": macro_map, "macro_f1": macro_f1}
 
     @torch.no_grad()
-    def val_epoch(self, dataloader: DataLoader[tuple[Tensor, Tensor, int]], epoch: int) -> dict[str, float]:
+    def val_epoch(self, dataloader: DataLoader[tuple[Tensor, Tensor, int]], epoch: int) -> dict[str, object]:
         self.model.eval()
         running_loss = 0.0
         targets_all: list[np.ndarray] = []
@@ -105,9 +105,18 @@ class Trainer:
         avg_loss = running_loss / max(1, len(dataloader))
         macro_map = compute_macro_map(targets_np, probs_np)
         macro_f1 = compute_macro_f1(targets_np, probs_np, threshold=self.threshold)
+        per_class_ap = compute_per_class_ap(targets_np, probs_np)
 
         self.writer.add_scalar("val/loss", avg_loss, epoch)
         self.writer.add_scalar("val/macro_map", macro_map, epoch)
         self.writer.add_scalar("val/macro_f1", macro_f1, epoch)
+        for cls_idx, ap in enumerate(per_class_ap):
+            if not np.isnan(ap):
+                self.writer.add_scalar(f"val/ap_class_{cls_idx}", float(ap), epoch)
 
-        return {"loss": avg_loss, "macro_map": macro_map, "macro_f1": macro_f1}
+        return {
+            "loss": avg_loss,
+            "macro_map": macro_map,
+            "macro_f1": macro_f1,
+            "per_class_ap": per_class_ap,
+        }
