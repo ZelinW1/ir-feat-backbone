@@ -1,0 +1,42 @@
+﻿project:
+  name: "flir-dinov2-ssl"
+  output_dir: "./outputs_ssl"
+  seed: 42
+  device: "cuda"
+
+data:
+  image_root: "F:/Papers/01-DPSC/dataset/FLIR_ADAS_v2"
+  crop_size: 224
+  num_workers: 4
+  pin_memory: true
+
+train:
+  epochs: 20
+  batch_size: 64
+  amp: true
+  freeze_backbone_epochs: 5
+
+model:
+  name: "ssl_dinov2"
+  projection_dim: 2048
+  projection_hidden_dim: 2048
+  prediction_hidden_dim: 512
+
+optim:
+  backbone_lr: 1.0e-5
+  head_lr: 1.0e-3
+  weight_decay: 1.0e-4
+
+scheduler:
+  name: "cosine"
+  min_lr: 1.0e-6
+
+logging:
+  backend: "tensorboard"
+  log_dir: "./outputs_ssl/runs"
+  print_freq: 20
+
+checkpoint:
+  dir: "./outputs_ssl/checkpoints"
+  best_name: "best_ssl_model.pth"
+  last_name: "last_ssl_model.pth"
